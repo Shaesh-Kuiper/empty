@@ -607,7 +607,9 @@ export const fetchHackerEarthStats = async (username: string) => {
       challenges: allChallenges,
       rewards: parsed.rewards || [],
     };
-  } catch {
+  } catch (error: any) {
+    console.error(`[HackerEarth] Scraper error for username "${username}":`, error.message || error);
+    console.error(`[HackerEarth] Stack trace:`, error.stack);
     return null;
   } finally {
     if (browser) await browser.close();
