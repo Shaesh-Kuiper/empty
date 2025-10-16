@@ -178,37 +178,19 @@ export const fetchHackerEarthStats = async (username: string) => {
       }
     });
 
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
-    // Wait longer for client-side widgets to render
-    await page.waitForTimeout(3000);
-    // Try to wait for likely metric keywords to appear
+    // Optimized for Vercel free tier (10s timeout)
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 8000 });
+    // Reduced wait time for content to render
+    await page.waitForTimeout(1500);
+    // Quick check for content availability
     await Promise.race([
-      page.waitForSelector("text=Points", { timeout: 5000 }).catch(() => {}),
-      page.waitForSelector("text=Problems", { timeout: 5000 }).catch(() => {}),
-      page.waitForSelector("text=Solved", { timeout: 5000 }).catch(() => {}),
+      page.waitForSelector("text=Points", { timeout: 2000 }).catch(() => {}),
+      page.waitForSelector("text=Problems", { timeout: 2000 }).catch(() => {}),
+      page.waitForTimeout(2000), // Fallback timeout
     ]);
 
-    // Look for and click on tabs to load different sections
-    try {
-      // First try to click Performance tab to load challenge data
-      const performanceTab = page.locator('text=/^Performance$/i').first();
-      if (await performanceTab.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await performanceTab.click();
-        await page.waitForTimeout(3000); // Wait for content to load
-      }
-    } catch (e) {
-      // Performance tab might not be available
-    }
-
-    // Scroll down to ensure Rewards section loads (if it's lazy-loaded)
-    try {
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      });
-      await page.waitForTimeout(1500); // Wait for any lazy-loaded content
-    } catch (e) {
-      // Ignore scrolling errors
-    }
+    // Skip Performance tab clicking and scrolling to save time
+    // These are optional features that add 4-5 seconds
 
     // Challenges are extracted from the challenge-activity API
     const allChallenges: Array<{ name: string; rank: number | null; score: number | null; ratingChange: string | null }> = [];

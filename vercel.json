@@ -1,7 +1,7 @@
 {
   "functions": {
     "app/api/hackerearth/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 10
     }
   }
 }
