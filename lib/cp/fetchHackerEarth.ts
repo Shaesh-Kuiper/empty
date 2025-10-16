@@ -119,14 +119,23 @@ export const fetchHackerEarthStats = async (username: string) => {
   // Use Playwright for dynamic content
   let browser;
   try {
+    console.log(`[HackerEarth] Environment: ${isProduction ? 'Production (Vercel/Lambda)' : 'Local Development'}`);
+
     if (isProduction) {
-      // Use playwright-aws-lambda for Vercel/AWS Lambda
-      const playwright = await import("playwright-aws-lambda");
-      browser = await playwright.default.launchChromium({
-        args: playwright.default.getChromiumArgs(true),
+      // Use @sparticuz/chromium for Vercel/AWS Lambda
+      console.log(`[HackerEarth] Launching Chromium via @sparticuz/chromium...`);
+      const chromium = await import("@sparticuz/chromium");
+      const { chromium: playwrightChromium } = await import("playwright-core");
+
+      browser = await playwrightChromium.launch({
+        args: chromium.default.args,
+        executablePath: await chromium.default.executablePath(),
+        headless: true,
       });
+      console.log(`[HackerEarth] Browser launched successfully`);
     } else {
       // Use regular playwright for local development
+      console.log(`[HackerEarth] Launching Chromium via playwright...`);
       const { chromium } = await import("playwright");
       browser = await chromium.launch({
         headless: true,
@@ -137,6 +146,7 @@ export const fetchHackerEarthStats = async (username: string) => {
           '--disable-setuid-sandbox',
         ]
       });
+      console.log(`[HackerEarth] Browser launched successfully`);
     }
 
     const context = await browser.newContext({
