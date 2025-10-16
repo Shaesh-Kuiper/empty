@@ -4,7 +4,9 @@
 // Rankings for Algorithms and Data Structures (rank, points, performance) when found.
 import axios from "axios";
 import * as cheerio from "cheerio";
-import { chromium } from "playwright";
+
+// Use playwright-aws-lambda in production (Vercel), regular playwright locally
+const isProduction = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
 
 type RankTriple = { rank: number | null; points: number | null; performance: string | null };
 type Challenge = { name: string; rank: number | null; score: number | null; ratingChange: string | null };
@@ -117,15 +119,25 @@ export const fetchHackerEarthStats = async (username: string) => {
   // Use Playwright for dynamic content
   let browser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-      ]
-    });
+    if (isProduction) {
+      // Use playwright-aws-lambda for Vercel/AWS Lambda
+      const playwright = await import("playwright-aws-lambda");
+      browser = await playwright.default.launchChromium({
+        args: playwright.default.getChromiumArgs(true),
+      });
+    } else {
+      // Use regular playwright for local development
+      const { chromium } = await import("playwright");
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--disable-dev-shm-usage',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+        ]
+      });
+    }
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
