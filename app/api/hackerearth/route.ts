@@ -22,6 +22,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ username, stats });
   } catch (err: any) {
     console.error(`[HackerEarth] Error:`, err);
-    return NextResponse.json({ error: err?.message || "Server error" }, { status: 500 });
+
+    // Return user-friendly message for Vercel free tier limitation
+    const errorMessage = err?.message || "Server error";
+    const statusCode = errorMessage.includes('Vercel Pro') ? 503 : 500;
+
+    return NextResponse.json({
+      error: errorMessage,
+      tip: statusCode === 503 ? "HackerEarth tracking works locally. To use on Vercel, upgrade to Pro plan for 60-second timeout." : undefined
+    }, { status: statusCode });
   }
 }

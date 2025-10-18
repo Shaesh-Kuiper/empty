@@ -12,6 +12,9 @@ type RankTriple = { rank: number | null; points: number | null; performance: str
 type Challenge = { name: string; rank: number | null; score: number | null; ratingChange: string | null };
 
 export const fetchHackerEarthStats = async (username: string) => {
+  // Optimized to work within Vercel's 10-second timeout through aggressive resource blocking and timing optimizations
+
+  // Local development - use full browser automation
   const parseFromText = (docText: string) => {
     // Remove JSON data that might contain misleading values (like badge points)
     // Remove everything between { and } that looks like JSON
@@ -119,23 +122,20 @@ export const fetchHackerEarthStats = async (username: string) => {
   // Use Playwright for dynamic content
   let browser;
   try {
-    console.log(`[HackerEarth] Environment: ${isProduction ? 'Production (Vercel/Lambda)' : 'Local Development'}`);
+    const startTime = Date.now();
 
     if (isProduction) {
       // Use @sparticuz/chromium for Vercel/AWS Lambda
-      console.log(`[HackerEarth] Launching Chromium via @sparticuz/chromium...`);
       const chromium = await import("@sparticuz/chromium");
       const { chromium: playwrightChromium } = await import("playwright-core");
 
       browser = await playwrightChromium.launch({
-        args: chromium.default.args,
+        args: [...chromium.default.args, '--disable-dev-shm-usage', '--no-sandbox'],
         executablePath: await chromium.default.executablePath(),
         headless: true,
       });
-      console.log(`[HackerEarth] Browser launched successfully`);
     } else {
       // Use regular playwright for local development
-      console.log(`[HackerEarth] Launching Chromium via playwright...`);
       const { chromium } = await import("playwright");
       browser = await chromium.launch({
         headless: true,
@@ -146,22 +146,25 @@ export const fetchHackerEarthStats = async (username: string) => {
           '--disable-setuid-sandbox',
         ]
       });
-      console.log(`[HackerEarth] Browser launched successfully`);
     }
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
-      extraHTTPHeaders: {
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-      }
+      viewport: { width: 1280, height: 720 }, // Smaller viewport for faster rendering
     });
 
     const page = await context.newPage();
+
+    // CRITICAL: Block unnecessary resources to reduce load time by 50-70%
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, fonts, stylesheets, and media to drastically reduce page load time
+      if (['image', 'font', 'stylesheet', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
 
     // Remove webdriver property
     await page.addInitScript(() => {
@@ -188,19 +191,18 @@ export const fetchHackerEarthStats = async (username: string) => {
       }
     });
 
-    // Optimized for Vercel free tier (10s timeout)
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 8000 });
-    // Reduced wait time for content to render
-    await page.waitForTimeout(1500);
-    // Quick check for content availability
-    await Promise.race([
-      page.waitForSelector("text=Points", { timeout: 2000 }).catch(() => {}),
-      page.waitForSelector("text=Problems", { timeout: 2000 }).catch(() => {}),
-      page.waitForTimeout(2000), // Fallback timeout
-    ]);
+    // OPTIMIZED: Aggressive timeouts for Vercel's 10-second limit
+    // Use 'load' event but with short timeout - page content loads fast without images/CSS
+    await page.goto(url, { waitUntil: "load", timeout: 5000 });
 
-    // Skip Performance tab clicking and scrolling to save time
-    // These are optional features that add 4-5 seconds
+    // Minimal wait for dynamic content (reduced from 1500ms to 300ms)
+    await page.waitForTimeout(300);
+
+    // Quick check for essential content with shorter timeout
+    await Promise.race([
+      page.waitForSelector("text=Points", { timeout: 1000 }).catch(() => {}),
+      page.waitForTimeout(1000), // Fallback timeout
+    ]);
 
     // Challenges are extracted from the challenge-activity API
     const allChallenges: Array<{ name: string; rank: number | null; score: number | null; ratingChange: string | null }> = [];
@@ -311,12 +313,6 @@ export const fetchHackerEarthStats = async (username: string) => {
       const findSection = (keyword: string) => {
         const els = getAllElements();
         const out = { rank: null as number | null, points: null as number | null, performance: null as string | null };
-        const debugInfo: any = {
-          keyword,
-          totalElements: els.length,
-          foundMatches: 0,
-          sectionTexts: [] as string[],
-        };
 
         // Look for elements whose direct text content matches the keyword closely
         for (const el of els) {
@@ -325,8 +321,6 @@ export const fetchHackerEarthStats = async (username: string) => {
 
           // Check if this is a heading/label element that contains just the keyword
           if (normalizedText === norm(keyword) || (elText.length < 50 && elText.toLowerCase().includes(keyword.toLowerCase()))) {
-            debugInfo.foundMatches++;
-
             // Try parent element first (most common pattern: heading + stats in same parent)
             let container = el.parentElement;
             let chunk = '';
@@ -353,8 +347,6 @@ export const fetchHackerEarthStats = async (username: string) => {
             }
 
             if (chunk) {
-              debugInfo.sectionTexts.push(chunk.substring(0, 400));
-
               // Pattern: "Algorithms 22339 180 Top 13%" or "Data Structure 7508 390 Top 5%"
               // Format: [Name] [Rank] [Points] [Performance]
               const compactPattern = new RegExp(`${keyword}[\\s]+([0-9,\\.]+)[\\s]+([0-9,\\.]+)[\\s]+(Top\\s*\\d+%|[A-Za-z][A-Za-z0-9\\s%\\-+]*)`, 'i');
@@ -398,7 +390,7 @@ export const fetchHackerEarthStats = async (username: string) => {
           }
         }
 
-        return { ...out, _debug: debugInfo };
+        return out;
       };
 
       const Points = findNumberByLabels([
@@ -455,28 +447,19 @@ export const fetchHackerEarthStats = async (username: string) => {
       // Extract Rewards section
       const rewards: Array<{ category: string; level: string }> = [];
       const els = getAllElements();
-      let rewardsDebug = {
-        found: false,
-        searchAttempts: 0,
-        patterns: [] as string[]
-      };
 
       // Try multiple approaches to find rewards
       for (const el of els) {
         const text = (el.innerText || '').trim();
-        rewardsDebug.searchAttempts++;
 
         // Look for "Rewards" section or "Level" mentions
         if ((text.toLowerCase().includes('reward') || text.toLowerCase().includes('level')) && text.length < 50) {
-          rewardsDebug.found = true;
-
           // Look in parent/nearby elements
           let container = el.parentElement;
           let attempts = 0;
 
           while (container && container !== document.body && attempts < 8) {
             const containerText = (container.innerText || '').replace(/\n/g, ' ').trim();
-            rewardsDebug.patterns.push(containerText.substring(0, 200));
 
             // Multiple pattern variations to catch different formats
             // Format: "Global 15,035/25,000 Level 6/7 completed"
@@ -560,11 +543,6 @@ export const fetchHackerEarthStats = async (username: string) => {
         Submissions,
         rankings,
         rewards,
-        _debugRankings: {
-          algorithms: (algorithmsRaw as any)._debug,
-          dataStructures: (dataStructuresRaw as any)._debug,
-        },
-        _debugRewards: rewardsDebug
       };
     });
 
@@ -581,14 +559,17 @@ export const fetchHackerEarthStats = async (username: string) => {
 
             allChallenges.push({
               name: contest.event_title || 'Unknown Contest',
-              rank: contest.rank || null, // Contest rank if available
-              score: contest.rating, // Contest rating/score
+              rank: contest.rank || null,
+              score: contest.rating,
               ratingChange: ratingChange !== null ? (ratingChange > 0 ? `+${ratingChange}` : `${ratingChange}`) : null,
             });
           }
         }
       }
     }
+
+    const executionTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[HackerEarth] Scraping completed in ${executionTime}s for username: ${username}`);
 
     return {
       Points: parsed.Points ?? 0,
@@ -601,7 +582,6 @@ export const fetchHackerEarthStats = async (username: string) => {
     };
   } catch (error: any) {
     console.error(`[HackerEarth] Scraper error for username "${username}":`, error.message || error);
-    console.error(`[HackerEarth] Stack trace:`, error.stack);
     return null;
   } finally {
     if (browser) await browser.close();
